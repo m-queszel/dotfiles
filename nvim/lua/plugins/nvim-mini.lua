@@ -9,7 +9,6 @@ return {
         require("mini.splitjoin").setup({})
         require("mini.surround").setup({})
         require("mini.ai").setup({})
-        require("mini.indentscope").setup({})
         require("mini.tabline").setup({})
         require("mini.files").setup({})
         require("mini.cursorword").setup({})
@@ -18,4 +17,3 @@ return {
     end,
 }
 -- "Two words"
-

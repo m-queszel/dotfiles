@@ -12,7 +12,13 @@ return {
         })
     end,
     opts = {
-        ensure_installed = { "all" },
+        ensure_installed = {
+            "intelephense",
+            "emmet_ls",
+            "prettier",
+            "stylua",
+            "lua_ls",
+        },
         highlight = {
             enable = true,
             additional_vim_regex_highlighting = true,
