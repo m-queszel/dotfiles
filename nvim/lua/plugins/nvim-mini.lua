@@ -13,6 +13,7 @@ return {
         require("mini.cursorword").setup({})
         require("mini.notify").setup({})
         require("mini.statusline").setup({})
+        require("mini.tabline").setup({})
     end,
 }
 -- "Two words"

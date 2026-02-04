@@ -23,10 +23,6 @@ return {
             capabilities = capabilities,
             on_attach = on_attach,
         })
-        vim.lsp.config("tailwindcss", {
-            capabilities = capabilities,
-            on_attach = on_attach,
-        })
         vim.lsp.config("emmet_ls", {
             capabilities = capabilities,
             on_attach = on_attach,
