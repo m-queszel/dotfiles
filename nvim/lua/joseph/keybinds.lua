@@ -65,3 +65,8 @@ vim.keymap.set("n", "<leader>gs", ":Gitsigns stage_hunk<CR>", { desc = "Stage Hu
 vim.keymap.set("n", "<leader>gS", ":Gitsigns undo_stage_hunk<CR>", { desc = "Undo Stage Hunk" })
 vim.keymap.set("n", "<leader>gp", ":Gitsigns preview_hunk<CR>", { desc = "Preview Hunk" })
 vim.keymap.set("n", "<leader>gb", ":Gitsigns blame_line<CR>", { desc = "Blame Line" })
+
+-- Buffer navigation
+vim.keymap.set("n", "<leader>bn", ":bnext<CR>", { desc = "Next Buffer" })
+vim.keymap.set("n", "<leader>bp", ":bprev<CR>", { desc = "Previous Buffer" })
+vim.keymap.set("n", "<leader>bd", ":bdelete<CR>", { desc = "Delete Buffer" })
