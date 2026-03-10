@@ -6,6 +6,8 @@ end
 fish_add_path ~/.local/bin
 # Add Composer global binaries to PATH
 fish_add_path ~/.config/composer/vendor/bin
+# Add PHP 8.3.28 from MAMP to PATH
+fish_add_path /Applications/MAMP/bin/php/php8.3.28/bin
 
 
 

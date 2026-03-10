@@ -1,7 +1,7 @@
 vim.opt.expandtab = true
-vim.opt.shiftwidth = 4
-vim.opt.tabstop = 4
-vim.opt.softtabstop = 4
+vim.opt.shiftwidth = 2
+vim.opt.tabstop = 2
+vim.opt.softtabstop = 2
 
 vim.opt.smartindent = true
 
@@ -23,7 +23,8 @@ vim.opt.spell = true
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
 
-vim.opt.guicursor = "n-v-c-i:block"
+--vim.opt.guicursor = "n-v-c-i:block"
+vim.opt.guicursor = "n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20"
 
 vim.opt.list = true -- enable the below listchars
 vim.opt.listchars = { tab = "▸ ", trail = "·" }

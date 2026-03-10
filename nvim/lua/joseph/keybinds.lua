@@ -61,8 +61,14 @@ vim.keymap.set("t", "<C-l>", "<cmd>wincmd l<CR>", { desc = "Move focus to the ri
 -- Gitsigns
 vim.keymap.set("n", "]h", ":Gitsigns next_hunk<CR>", { desc = "Next Hunk" })
 vim.keymap.set("n", "[h", ":Gitsigns prev_hunk<CR>", { desc = "Prev Hunk" })
-vim.keymap.set("n", "<leader>gs", ":Gitsigns stage_hunk<CR>", { desc = "Stage Hunk" })
-vim.keymap.set("n", "<leader>gS", ":Gitsigns undo_stage_hunk<CR>", { desc = "Undo Stage Hunk" })
+vim.keymap.set("n", "<leader>gs", function()
+    require("gitsigns").stage_hunk()
+    require("gitsigns").refresh()
+end, { desc = "Stage Hunk" })
+vim.keymap.set("n", "<leader>gS", function()
+    require("gitsigns").undo_stage_hunk()
+    require("gitsigns").refresh()
+end, { desc = "Undo Stage Hunk" })
 vim.keymap.set("n", "<leader>gp", ":Gitsigns preview_hunk<CR>", { desc = "Preview Hunk" })
 vim.keymap.set("n", "<leader>gb", ":Gitsigns blame_line<CR>", { desc = "Blame Line" })
 

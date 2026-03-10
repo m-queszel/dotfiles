@@ -1,6 +1,7 @@
 return {
     {
         "Jezda1337/nvim-html-css",
+        enabled = false,
         dependencies = {
             "nvim-treesitter/nvim-treesitter",
         },
@@ -32,6 +33,8 @@ return {
             documentation = {
                 auto_show = true,
             },
+            suppress_warnings = true,
+            suppress_notifications = true,
             style_sheets = {
                 "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css",
                 "https://cdnjs.cloudflare.com/ajax/libs/bulma/1.0.3/css/bulma.min.css",
