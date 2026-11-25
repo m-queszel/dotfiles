@@ -20,6 +20,8 @@ return {
                 -- list of servers for mason to install
                 ensure_installed = {
                     "stylua",
+                    "vue_ls",
+                    "ts_ls",
                 },
                 -- auto-install configured servers (with lspconfig)
                 automatic_installation = true,

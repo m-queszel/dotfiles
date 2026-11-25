@@ -28,6 +28,9 @@ return {
                 end
                 return tree:root():named_descendant_for_range(row, col, row, col)
             end
+            function ts_utils_mock.get_node_text(node, bufnr)
+                return vim.treesitter.get_node_text(node, bufnr)
+            end
             package.preload["nvim-treesitter.ts_utils"] = function()
                 return ts_utils_mock
             end

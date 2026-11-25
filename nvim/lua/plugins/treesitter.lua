@@ -18,6 +18,7 @@ return {
             "prettier",
             "stylua",
             "lua_ls",
+            "vue",
         },
         highlight = {
             enable = true,

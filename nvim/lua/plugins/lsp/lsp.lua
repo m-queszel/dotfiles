@@ -13,6 +13,15 @@ return {
             opts.desc = "See available code action"
             keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, opts)
 
+            opts.desc = "Go to definition"
+            keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+
+            opts.desc = "Go to definition (alias for gf)"
+            keymap.set("n", "gf", vim.lsp.buf.definition, opts)
+
+            opts.desc = "Show references"
+            keymap.set("n", "gr", vim.lsp.buf.references, opts)
+
             opts.desc = "Show documentation for what is under cursor"
             keymap.set("n", "K", vim.lsp.buf.hover, opts)
         end
@@ -30,6 +39,25 @@ return {
         vim.lsp.config("intelephense", {
             capabilities = capabilities,
             on_attach = on_attach,
+        })
+        vim.lsp.config("vue_ls", {
+            capabilities = capabilities,
+            on_attach = on_attach,
+        })
+        vim.lsp.config("ts_ls", {
+            capabilities = capabilities,
+            on_attach = on_attach,
+            init_options = {
+                plugins = {
+                    {
+                        name = "@vue/typescript-plugin",
+                        location = vim.fn.stdpath("data")
+                            .. "/mason/packages/vue-language-server/node_modules/@vue/language-server",
+                        languages = { "vue" },
+                    },
+                },
+            },
+            filetypes = { "typescript", "javascript", "javascriptreact", "typescriptreact", "vue" },
         })
         vim.lsp.config("lua_ls", {
             settings = { -- custom settings for lua

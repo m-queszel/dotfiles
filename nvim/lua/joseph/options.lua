@@ -23,8 +23,8 @@ vim.opt.spell = true
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
 
---vim.opt.guicursor = "n-v-c-i:block"
-vim.opt.guicursor = "n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20"
+vim.opt.guicursor = "n-v-c-i:block"
+-- vim.opt.guicursor = "n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20"
 
 vim.opt.list = true -- enable the below listchars
 vim.opt.listchars = { tab = "▸ ", trail = "·" }
@@ -46,3 +46,5 @@ vim.opt.signcolumn = "yes:2"
 vim.opt.undofile = true -- persistent undo
 vim.opt.backup = true -- automatically save a backup file
 vim.opt.backupdir:remove(".") -- keep backups out of the current directory
+
+vim.opt.updatetime = 250 -- faster completion and diagnostic hover

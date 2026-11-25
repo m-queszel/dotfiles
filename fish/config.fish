@@ -5,9 +5,11 @@ end
 # Add local binaries to PATH
 fish_add_path ~/.local/bin
 # Add Composer global binaries to PATH
-fish_add_path ~/.config/composer/vendor/bin
+fish_add_path ~/.composer/vendor/bin
 # Add PHP 8.3.28 from MAMP to PATH
 fish_add_path /Applications/MAMP/bin/php/php8.3.28/bin
+# Add Homebrew Python 3.12 unversioned shims (python, python3, pip) to PATH
+fish_add_path /opt/homebrew/opt/python@3.12/libexec/bin
 
 
 
@@ -19,3 +21,4 @@ function fish_greeting
     end
     set -g fish_greeting_last_exit_time (date +%s)
 end
+source "$HOME/.cargo/env.fish"

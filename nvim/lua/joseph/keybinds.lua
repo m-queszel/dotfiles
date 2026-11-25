@@ -48,6 +48,13 @@ vim.api.nvim_create_autocmd("TextYankPost", {
     end,
 })
 
+-- Show diagnostics on hover
+vim.api.nvim_create_autocmd("CursorHold", {
+    callback = function()
+        vim.diagnostic.open_float(nil, { focusable = false })
+    end,
+})
+
 vim.keymap.set("n", "<C-h>", "<C-w>h", { desc = "Move focus to the left window" })
 vim.keymap.set("n", "<C-j>", "<C-w>j", { desc = "Move focus to the lower window" })
 vim.keymap.set("n", "<C-k>", "<C-w>k", { desc = "Move focus to the upper window" })
@@ -76,3 +83,8 @@ vim.keymap.set("n", "<leader>gb", ":Gitsigns blame_line<CR>", { desc = "Blame Li
 vim.keymap.set("n", "<leader>bn", ":bnext<CR>", { desc = "Next Buffer" })
 vim.keymap.set("n", "<leader>bp", ":bprev<CR>", { desc = "Previous Buffer" })
 vim.keymap.set("n", "<leader>bd", ":bdelete<CR>", { desc = "Delete Buffer" })
+
+-- Noice history
+vim.keymap.set("n", "<leader>nh", ":Noice history<CR>", { desc = "Noice History" })
+vim.keymap.set("n", "<leader>ne", ":Noice errors<CR>", { desc = "Noice Errors" })
+vim.keymap.set("n", "<leader>nl", ":Noice last<CR>", { desc = "Noice Last Message" })

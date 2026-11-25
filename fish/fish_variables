@@ -1,4 +1,4 @@
 # This file contains fish universal variable definitions.
 # VERSION: 3.0
 SETUVAR __fish_initialized:4300
-SETUVAR fish_user_paths:/Users/josephmartin/\x2elocal/bin\x1e/home/mentat/\x2econfig/composer/vendor/bin\x1e/home/mentat/\x2elocal/bin
+SETUVAR fish_user_paths:/opt/homebrew/opt/python\x403\x2e12/libexec/bin\x1e/Users/josephmartin/\x2ecomposer/vendor/bin\x1e/Applications/MAMP/bin/php/php8\x2e3\x2e28/bin\x1e/Users/josephmartin/\x2elocal/bin\x1e/home/mentat/\x2econfig/composer/vendor/bin\x1e/home/mentat/\x2elocal/bin

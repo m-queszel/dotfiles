@@ -8,6 +8,9 @@ return {
         python = { "isort", "black" },
         rust = { "rustfmt" },
         javascript = { "prettierd", "prettier" },
+        vue = { "prettierd", "prettier" },
+        php = { "pint" },
+        blade = { "pint" },
       },
       formatters = {
         stylua = {
@@ -17,7 +20,14 @@ return {
           prepend_args = { "--profile", "black" },
         },
         prettier = {
-          prepend_args = { "--tab-width", "4" },
+          prepend_args = {
+            "--tab-width",
+            "4",
+            "--bracket-same-line",
+            "true",
+            "--print-width",
+            "100",
+          },
         },
       },
     })
