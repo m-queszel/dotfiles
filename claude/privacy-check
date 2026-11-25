@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fails if any file git would commit in REPO looks confidential: an email address, a project
+# path under MAMP htdocs, a .local hostname, or a term listed in ~/.claude/private-terms.txt.
+# Usage: claude/privacy-check REPO
+
+repo=${1:?usage: privacy-check REPO}
+terms=$HOME/.claude/private-terms.txt
+
+hits=$(git -C "$repo" grep -n -I --untracked -E \
+    -e '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' \
+    -e '/Applications/MAMP/htdocs/[A-Za-z0-9]' \
+    -e '[A-Za-z0-9-]\.local([^A-Za-z0-9_]|$)')
+if [ -s "$terms" ]; then
+    hits=$hits$'\n'$(grep -v '^[[:space:]]*$' "$terms" | git -C "$repo" grep -n -I --untracked -i -F -f -)
+fi
+hits=$(grep . <<<"$hits")
+
+if [ -n "$hits" ]; then
+    echo "privacy-check: confidential-looking text in files git would commit:"
+    echo "$hits"
+    exit 1
+fi
