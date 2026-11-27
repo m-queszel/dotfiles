@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# Credit to ThePrimeagen
-# Workspace launcher for the Claude cockpit: one tmux session per repo or worktree,
-# with Claude on the left and a shell on the right.
-#   t          pick a repo/worktree under the root (or "+ new worktree")
-#   t PATH     open PATH
-# The root is where tmux was opened; sessions made by t inherit it (@cockpit_root).
+
+usage() {
+    cat <<'EOF'
+Open a tmux session for a repo or worktree: Claude on the left, a shell on the right.
+
+  t          pick a repo or worktree under the root, or "+ new worktree"
+  t PATH     open PATH
+
+The root is the folder tmux was opened in; sessions made by t inherit it.
+A new worktree gets the files listed in the repo's .worktreeinclude, or its .env.
+EOF
+}
+
+menu() { fzf --color=16 --layout=reverse "$@"; }
 
 cockpit_root() {
     if [ -z "${TMUX:-}" ]; then
@@ -18,8 +26,10 @@ cockpit_root() {
 }
 
 list_candidates() {
-    { [ -e "$1/.git" ] && echo "$1"
-        find "$1" -mindepth 2 -maxdepth 3 -name .git 2>/dev/null | while read -r g; do dirname "$g"; done | sort; }
+    {
+        [ -e "$1/.git" ] && echo "$1"
+        find "$1" -mindepth 2 -maxdepth 3 -name .git 2>/dev/null | while read -r g; do dirname "$g"; done | sort
+    }
     echo "+ new worktree"
 }
 
@@ -75,12 +85,12 @@ new_worktree() {
     echo "$dir"
 }
 
-project_key() { echo "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
+project_key() { echo "${1//[^A-Za-z0-9]/-}"; }
 
 claude_cmd() {
     local name=$2
     [[ $name =~ ^[A-Za-z0-9._/-]+$ ]] || name=$(slug "$name")
-    if ls "$HOME/.claude/projects/$(project_key "$1")"/*.jsonl >/dev/null 2>&1; then
+    if compgen -G "$HOME/.claude/projects/$(project_key "$1")/*.jsonl" >/dev/null; then
         echo "claude --continue"
     else
         echo "claude -n '$name'"
@@ -105,16 +115,17 @@ open_session() {
 
 main() {
     local root dir repo repos branch
+    case ${1:-} in -h | --help) usage && exit 0 ;; esac
     root=$(cockpit_root)
     if [ $# -eq 1 ]; then
         dir=$1
     else
-        dir=$(list_candidates "$root" | fzf --prompt="t> ") || exit 0
+        dir=$(list_candidates "$root" | menu --prompt='t ▌ ') || exit 0
     fi
     if [ "$dir" = "+ new worktree" ]; then
         repos=$(list_candidates "$root" | while read -r d; do [ -d "$d/.git" ] && echo "$d"; done)
         if [ "$(grep -c . <<<"$repos")" -gt 1 ]; then
-            repo=$(fzf --prompt="repo> " <<<"$repos") || exit 0
+            repo=$(menu --prompt='repo ▌ ' <<<"$repos") || exit 0
         else
             repo=$repos
         fi

@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-DOTFILES=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
+cd "$(dirname "$(readlink -f "$0")")"
 
-rm -rf $HOME/.config/kitty
-ln -s $DOTFILES/kitty $HOME/.config/kitty
-
-rm -rf $HOME/.tmux.conf
-ln -s $DOTFILES/tmux/tmux.conf $HOME/.tmux.conf
-
-mkdir -p $HOME/.local/bin
-rm -rf $HOME/.local/bin/t
-ln -s $DOTFILES/scripts/t $HOME/.local/bin/t
-
-rm -rf $HOME/.config/nvim
-ln -s $DOTFILES/nvim $HOME/.config/nvim
-
-rm -rf $HOME/.config/fish
-ln -s $DOTFILES/fish $HOME/.config/fish
-
-for name in claude-tmux-hook claude-tmux-pulse claude-tmux-jump; do
-    ln -sf $DOTFILES/scripts/$name $HOME/.local/bin/$name
+PATH=$HOME/.cargo/bin:$PATH
+if [[ $(uname) == Darwin ]]; then
+    brew bundle --file Brewfile
+    command -v matugen >/dev/null || cargo install matugen
+    [[ $SHELL == */zsh ]] || chsh -s /bin/zsh
+fi
+for tool in stow tmux zsh starship matugen fzf jq python3; do
+    command -v "$tool" >/dev/null || { echo "install: $tool is missing; install it and run ./install again" >&2 && exit 1; }
 done
 
-"$DOTFILES/claude/install-claude"
+git config core.hooksPath .githooks
+
+if [[ -L ~/.tmux.conf && $(readlink ~/.tmux.conf) == "$PWD"/* ]]; then
+    rm ~/.tmux.conf
+fi
+./link
+bin/claude-setup
+
+if [[ ! -f ${XDG_STATE_HOME:-$HOME/.local/state}/theme/colors.json ]]; then
+    bin/theme '#b86b4f'
+    echo "install: seeded default colours; change them with: theme <image>"
+fi
+
+echo "install: done. Open a new kitty window, then start tmux."

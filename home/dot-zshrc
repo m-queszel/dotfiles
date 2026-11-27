@@ -1,0 +1,67 @@
+HISTFILE=${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history
+HISTSIZE=50000
+SAVEHIST=50000
+[[ -d ${HISTFILE:h} ]] || mkdir -p ${HISTFILE:h}
+setopt EXTENDED_HISTORY SHARE_HISTORY HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE HIST_REDUCE_BLANKS
+
+setopt AUTO_CD INTERACTIVE_COMMENTS
+bindkey -e
+
+[[ -n $HOMEBREW_PREFIX || ! -x /opt/homebrew/bin/brew ]] || eval "$(/opt/homebrew/bin/brew shellenv)"
+typeset -U path PATH
+path=(
+    $HOME/.local/bin
+    $HOME/.cargo/bin(N)
+    $HOME/.composer/vendor/bin(N)
+    /Applications/MAMP/bin/php/php8.3.28/bin(N)
+    /opt/homebrew/opt/python@3.12/libexec/bin(N)
+    $path
+)
+
+alias ls="${commands[gls]:-ls} --color=auto"
+alias grep='grep --color=auto'
+
+activate() { source ${1:-.venv}/bin/activate }
+docker-term() { docker compose -f compose.dev.yaml exec workspace bash }
+[[ $OSTYPE != darwin* ]] || obsidian() { open -a Obsidian "$@" }
+
+autoload -Uz compinit
+() {
+    setopt local_options extended_glob
+    local dump=${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump
+    [[ -d ${dump:h} ]] || mkdir -p ${dump:h}
+    if [[ ! -e $dump || -n $dump(#qN.mh+24) ]]; then
+        compinit -d $dump
+    else
+        compinit -C -d $dump
+    fi
+}
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
+_ls_colors() {
+    local f=${XDG_CONFIG_HOME:-$HOME/.config}/ls-colors
+    [[ -r $f ]] && export LS_COLORS=$(<$f)
+    zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
+}
+_ls_colors
+
+if (( $+commands[starship] )); then
+    eval "$(starship init zsh)"
+    source ${XDG_CONFIG_HOME:-$HOME/.config}/zsh/pixel-prompt.zsh
+    source ${XDG_CONFIG_HOME:-$HOME/.config}/zsh/title-screen.zsh
+fi
+
+_plugin() {
+    local dir
+    for dir in /usr/share/zsh/plugins/$1 ${HOMEBREW_PREFIX:-/usr/local}/share/$1 /usr/share/$1; do
+        [[ -r $dir/$1.zsh ]] || continue
+        source $dir/$1.zsh
+        return
+    done
+    print -u2 "zshrc: $1 is not installed"
+}
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=40
+_plugin zsh-autosuggestions
+_plugin zsh-syntax-highlighting

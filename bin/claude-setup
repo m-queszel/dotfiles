@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+
+repo=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
+
+usage() {
+    cat <<'EOF'
+Set up ~/.claude from the dotfiles: links, settings, plugins and skills.
+
+  claude-setup
+
+settings.json is rebuilt from claude/settings.shared.json plus ~/.claude/settings.private.json.
+The private file holds what only this machine needs: its values win and lists from both are joined.
+The first run fills it from the settings.json that is already there, so nothing local is lost.
+Edit one of those two files, never settings.json itself, then run claude-setup again.
+EOF
+}
+
+merge_settings() {
+    local private=$2
+    [ -f "$private" ] || private=/dev/null
+    jq -s '
+        def dedupe: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
+        def merge($a; $b):
+            if ($a | type) == "object" and ($b | type) == "object" then
+                reduce ($b | keys_unsorted[]) as $k ($a; .[$k] = merge($a[$k]; $b[$k]))
+            elif ($a | type) == "array" and ($b | type) == "array" then $a + $b | dedupe
+            elif $b == null then $a
+            else $b end;
+        merge(.[0]; .[1] // {})' "$1" "$private"
+}
+
+split_private() {
+    jq -s '
+        def minus($s):
+            if . == $s then null
+            elif type == "object" and ($s | type) == "object" then
+                with_entries(.key as $k | .value |= minus($s[$k])) | with_entries(select(.value != null))
+                | if . == {} then null else . end
+            elif type == "array" and ($s | type) == "array" then
+                [.[] | select(. as $x | $s | index([$x]) | not)] | if . == [] then null else . end
+            else . end;
+        .[1] as $shared | (.[0] | minus($shared)) // {}' "$1" "$2"
+}
+
+sha_of() { { shasum "$1" 2>/dev/null || sha1sum "$1"; } | cut -d' ' -f1; }
+
+write_settings() {
+    local shared=$1/settings.shared.json out=$HOME/.claude/settings.json new bak
+    local record=$HOME/.claude/.settings.generated.sha private=$HOME/.claude/settings.private.json
+    mkdir -p "$HOME/.claude"
+    if [ -f "$out" ] && [ ! -f "$record" ] && [ ! -f "$private" ]; then
+        split_private "$out" "$shared" >"$private" || return 1
+        echo "claude-setup: kept this machine's own settings in $private"
+    fi
+    new=$(merge_settings "$shared" "$private") || return 1
+    if [ -f "$out" ] && [ "$(sha_of "$out")" != "$(cat "$record" 2>/dev/null)" ] &&
+        [ "$(jq -S . "$out")" != "$(jq -S . <<<"$new")" ]; then
+        bak=$out.bak-$(date +%Y%m%d%H%M%S)
+        cp "$out" "$bak"
+        echo "claude-setup: settings.json changed locally; backed up to $bak; keys that differ:"
+        jq -rn --slurpfile a "$out" --argjson b "$new" \
+            '$a[0] as $a | [($a | keys) + ($b | keys) | unique[] | select($a[.] != $b[.])] | join(", ")'
+    fi
+    printf '%s\n' "$new" >"$out"
+    sha_of "$out" >"$record"
+}
+
+install_plugins() {
+    local settings=$HOME/.claude/settings.json known=$HOME/.claude/plugins/known_marketplaces.json
+    local installed=$HOME/.claude/plugins/installed_plugins.json markets plugins item answer
+    if ! command -v claude >/dev/null; then
+        echo "claude-setup: claude CLI not found; install it, then run claude-setup again for plugins"
+        return 0
+    fi
+    [ -f "$known" ] || known=/dev/null
+    [ -f "$installed" ] || installed=/dev/null
+    markets=$(jq -r --slurpfile k "$known" '($k[0] // {}) as $k
+        | .extraKnownMarketplaces // {} | to_entries[] | select($k[.key] == null) | .value.source.repo // empty' "$settings")
+    plugins=$(jq -r --slurpfile i "$installed" '(($i[0] // {}).plugins // {}) as $i
+        | .enabledPlugins // {} | to_entries[] | select(.value == true and $i[.key] == null) | .key' "$settings")
+    [ -n "$markets$plugins" ] || return 0
+    echo "claude-setup: about to fetch third-party Claude plugins (they run with your Claude permissions):"
+    for item in $markets; do echo "  marketplace  $item"; done
+    for item in $plugins; do echo "  plugin       $item"; done
+    read -r -p "Fetch them now? [y/N] " answer
+    case $answer in y | Y | yes) ;; *) echo "claude-setup: skipped plugins; run claude-setup again to add them later" && return 0 ;; esac
+    for item in $markets; do
+        claude plugin marketplace add "$item" || echo "claude-setup: could not add marketplace $item"
+    done
+    for item in $plugins; do
+        claude plugin install "$item" --scope user || echo "claude-setup: could not install plugin $item"
+    done
+}
+
+install_skills() {
+    local src
+    if ! command -v npx >/dev/null; then
+        echo "claude-setup: npx not found; install Node.js, then run claude-setup again for skills"
+        return 0
+    fi
+    while IFS= read -r src; do
+        [ -n "$src" ] || continue
+        npx -y skills add "$src" -g -y --skill '*' || echo "claude-setup: could not add skills from $src"
+    done <"$1/skills.txt"
+    echo "claude-setup: for graphify run: uv tool install graphifyy && graphify install --platform claude"
+    echo "claude-setup: for the find-docs skill run: npx ctx7 setup --cli"
+}
+
+main() {
+    case ${1:-} in -h | --help) usage && return 0 ;; esac
+    "$repo/link" claude || return 1
+    write_settings "$repo/claude" || return 1
+    install_plugins
+    install_skills "$repo/claude"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@" || exit 1; fi

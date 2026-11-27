@@ -36,6 +36,10 @@ while i < len(data):
     if data[i] in "\r\n":
         i += 1
         continue
+    if data[i] == "\b":
+        col -= 1
+        i += 1
+        continue
     if data[i] in "━┃┏┓┗┛┣┫┳┻╋─│┼├┤┬┴" and fg == target:
         ever.add((row, col))
     col += 1

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Fails if any file git would commit in REPO looks confidential: an email address, a project
-# path under MAMP htdocs, a .local hostname, or a term listed in ~/.claude/private-terms.txt.
-# Usage: claude/privacy-check REPO
 
 repo=${1:?usage: privacy-check REPO}
 terms=$HOME/.claude/private-terms.txt

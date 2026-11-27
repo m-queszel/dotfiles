@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config=${XDG_CONFIG_HOME:-$HOME/.config}
+
+usage() {
+    cat <<'EOF'
+Recolour the terminal, tmux and the prompt from an image or from one colour.
+
+  theme <image> [--light]
+  theme '#b86b4f' [--light]
+
+Colours come from matugen (~/.config/matugen/terminal.toml).
+On the Linux desktop use wallpaper instead: it recolours the terminal and the desktop together.
+EOF
+}
+
+mode=dark from=
+for arg in "$@"; do
+    case $arg in
+        --light) mode=light ;;
+        --dark) mode=dark ;;
+        -h | --help) usage && exit 0 ;;
+        -*) usage >&2 && exit 2 ;;
+        *) from=$arg ;;
+    esac
+done
+[[ -n $from ]] || { usage >&2 && exit 2; }
+
+if [[ -f $from ]]; then
+    kind=(image "$from")
+else
+    kind=(color hex "$from")
+fi
+mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/theme"
+matugen -c "$config/matugen/terminal.toml" "${kind[@]}" -m "$mode" -t scheme-tonal-spot >/dev/null
+
+pkill -USR1 -x kitty || true
+tmux source-file -q "$config/tmux/colors.conf" 2>/dev/null || true
+"$(dirname "$(readlink -f "$0")")/pixel-art-refresh"

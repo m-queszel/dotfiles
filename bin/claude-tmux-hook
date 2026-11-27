@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# Claude Code hook for the tmux cockpit.
-# Records each Claude pane's state as tmux pane options:
-#   @claude_state idle|working|agents|waiting|done @claude_attn 1|unset
-#   @claude_label branch or folder           @claude_ts epoch of last waiting/done
-# Modes:
-#   claude-tmux-hook                       Claude Code hook: event JSON on stdin, pane = $TMUX_PANE
-#   claude-tmux-hook focus-in PANE         tmux pane-focus-in hook
-#   claude-tmux-hook focus-out PANE FLAGS  tmux pane-focus-out hook (FLAGS = #{client_flags})
-# Never blocks Claude: always exits 0 and prints nothing.
+
+SHELLS='^-?(zsh|fish|bash|sh)$'
+LIVE="#{&&:#{@claude_state},#{!:#{m/r:$SHELLS,#{pane_current_command}}}}"
 
 tm() { tmux "$@" 2>/dev/null; }
 
@@ -22,6 +16,19 @@ refresh_status() {
     for c in $(tm list-clients -F '#{client_name}'); do tm refresh-client -S -t "$c"; done
 }
 
+sync_strips() {
+    local w want have
+    tm list-windows -a -F "#{window_id} #{?#{P:#{?$LIVE,1,}},top,off} #{pane-border-status}" |
+        while read -r w want have; do
+            [ "$want" = "$have" ] && continue
+            if [ "$want" = top ]; then
+                tm set -w -t "$w" pane-border-status top
+            else
+                tm set -wu -t "$w" pane-border-status
+            fi
+        done
+}
+
 set_state() {
     local p=$1 o
     if [ "$2" = none ]; then
@@ -32,6 +39,7 @@ set_state() {
         tm set -p -t "$p" @claude_state "$2"
         case $2 in waiting | done) tm set -p -t "$p" @claude_ts "$(date +%s)" ;; esac
     fi
+    sync_strips
     refresh_status
 }
 
@@ -68,8 +76,9 @@ is_looking() {
 b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
 osc99() {
-    local id="cockpit$(date +%s)"
-    printf '\033]99;i=%s:d=0:e=1:p=title;%s\033\\\033]99;i=%s:d=1:e=1:p=body;%s\033\\' \
+    local id
+    id=cockpit$(date +%s)
+    printf '\033]99;i=%s:d=0:e=1:p=title;%s\033\134\033]99;i=%s:d=1:e=1:p=body;%s\033\134' \
         "$id" "$(b64 "$1")" "$id" "$(b64 "$2")"
 }
 
@@ -82,9 +91,11 @@ notify() {
     tty=$(tm list-clients -F '#{client_activity} #{client_tty}' | sort -rn | head -1 | cut -d' ' -f2)
     if [ -n "$tty" ] && [ -w "$tty" ]; then
         osc99 "$1" "$2" >"$tty"
-    else
+    elif command -v osascript >/dev/null; then
         osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
             -e 'end run' "$1" "$2" >/dev/null 2>&1
+    else
+        notify-send -a Claude "$1" "$2" >/dev/null 2>&1
     fi
 }
 
@@ -121,7 +132,7 @@ handle_event() {
         PreToolUse) [ "$tool" = AskUserQuestion ] && alert "$p" waiting "${question:-Claude has a question}" ;;
         Notification) [ "$ntype" = elicitation_dialog ] && alert "$p" waiting "${message:-Claude needs input}" ;;
         StopFailure) alert "$p" waiting "Turn ended with an error" ;;
-        Stop) if [ "${agents:-0}" -gt 0 ]; then set_attn "$p" 0 && set_state "$p" agents; else alert "$p" done "${lastline:-Finished}"; fi ;;
+        Stop) if [ "${agents:-0}" -gt 0 ]; then set_attn "$p" 0 && set_state "$p" agents; else alert "$p" "done" "${lastline:-Finished}"; fi ;;
         SessionEnd) case $reason in clear | resume) ;; *) set_state "$p" none ;; esac ;;
     esac
 }

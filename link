@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$(readlink -f "$0")")"
+
+config=${XDG_CONFIG_HOME:-$HOME/.config}
+
+target() {
+    case $1 in
+        home) echo "$HOME" ;;
+        bin) echo "$HOME/.local/bin" ;;
+        claude) echo "$HOME/.claude" ;;
+        *) echo "$config/$1" ;;
+    esac
+}
+
+usage() {
+    cat <<'EOF'
+Link packages into place with GNU Stow; each top-level directory is one package.
+
+  ./link [package...]           link (or relink) the packages, all of them by default
+  ./link --check [package...]   fail if a package file isn't linked yet
+  ./link --unlink package...    remove a package's links
+
+home -> ~, bin -> ~/.local/bin, claude -> ~/.claude, anything else -> ~/.config/<package>
+tests and fish are not linked by default.
+
+Linking never overwrites a file of yours: one that is in the way is renamed to <name>.bak-<time>.
+Links left by the old whole-folder installer are replaced.
+EOF
+}
+
+action="link"
+case ${1:-} in
+    --check) action="check" && shift ;;
+    --unlink) action="unlink" && shift ;;
+    -h | --help) usage && exit 0 ;;
+    -*) usage >&2 && exit 2 ;;
+esac
+
+packages=()
+if (($#)); then
+    packages=("${@%/}")
+else
+    for dir in */; do
+        case ${dir%/} in tests | fish) ;; *) packages+=("${dir%/}") ;; esac
+    done
+fi
+
+stowed() {
+    stow --dotfiles --no-folding -t "$(target "$1")" "${@:2}" "$1"
+}
+
+clear_the_way() {
+    local dir file to
+    dir=$(target "$1")
+    if [[ -L $dir && $(readlink "$dir") == "$PWD"/* ]]; then
+        rm "$dir"
+    fi
+    mkdir -p "$dir"
+    while IFS= read -r file; do
+        to=$dir/${file#"$1"/}
+        to=${to//\/dot-//.}
+        if [[ -L $to && ($(readlink "$to") == "$PWD"/* || ! -e $to) ]]; then
+            rm "$to"
+        elif [[ -e $to && ! -L $to ]]; then
+            mv "$to" "$to.bak-$(date +%Y%m%d%H%M%S)"
+            echo "link: kept your $to as a .bak file"
+        fi
+    done < <(find "$1" -type f)
+}
+
+status=0
+for pkg in "${packages[@]}"; do
+    [[ -d $pkg ]] || { echo "link: no package $pkg" >&2 && exit 2; }
+    case $action in
+        link)
+            clear_the_way "$pkg"
+            stowed "$pkg" -R
+            ;;
+        unlink) stowed "$pkg" -D ;;
+        check)
+            plan=$([[ -d $(target "$pkg") ]] && stowed "$pkg" -n -v 2>&1 || echo LINK)
+            if grep -qE '^(LINK|WARNING!)' <<<"$plan"; then
+                echo "$pkg is not fully linked: run ./link $pkg"
+                status=1
+            fi
+            ;;
+    esac
+done
+exit "$status"

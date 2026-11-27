@@ -1,0 +1,30 @@
+[config]
+prefer = "saturation"
+
+[config.custom_colors]
+red = "#e06c75"
+green = "#98c379"
+yellow = "#e5c07b"
+blue = "#61afef"
+magenta = "#c678dd"
+cyan = "#56b6c2"
+
+[templates.colors]
+input_path = "~/.config/matugen/templates/colors.json"
+output_path = "~/.local/state/theme/colors.json"
+
+[templates.kitty]
+input_path = "~/.config/matugen/templates/kitty-colors.conf"
+output_path = "~/.config/kitty/colors.conf"
+
+[templates.tmux]
+input_path = "~/.config/matugen/templates/tmux-colors.conf"
+output_path = "~/.config/tmux/colors.conf"
+
+[templates.ls-colors]
+input_path = "~/.config/matugen/templates/ls-colors"
+output_path = "~/.config/ls-colors"
+
+[templates.starship]
+input_path = "~/.config/matugen/templates/starship.toml"
+output_path = "~/.config/starship.toml"

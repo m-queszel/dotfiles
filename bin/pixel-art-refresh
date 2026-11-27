@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/pixel-prompt
+colors=${XDG_STATE_HOME:-$HOME/.local/state}/theme/colors.json
+zdir=${XDG_CONFIG_HOME:-$HOME/.config}/zsh
+
+[[ -d $cache ]] || exit 0
+exec 9>"$cache/.refresh.lock"
+python3 -I -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)'
+
+for dir in "$cache"/*x*/; do
+    dir=${dir%/} cell=${dir##*/}
+    python3 -I "$zdir/pixel-cursor.py" "${cell%x*}" "${cell#*x}" "$colors" "$dir" &
+    if [[ -e $dir/title.vars ]]; then
+        python3 -I "$zdir/armillary.py" "${cell%x*}" "${cell#*x}" "$colors" "$dir" &
+    fi
+    if [[ -e $dir/lava.kgp ]]; then
+        python3 -I "$zdir/lava.py" "${cell%x*}" "${cell#*x}" "$colors" "$dir" &
+    fi
+done
+wait
+
+if tmux has-session 2>/dev/null; then
+    tmux list-sessions -F '#{session_id}' | while read -r s; do tmux set -t "$s" @lamp_need 1; done
+fi
+
+for f in "$cache"/shells/*; do
+    [[ -e $f ]] || continue
+    pid=${f##*/}
+    started=$(LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null) || started=
+    if [[ -n $started && $started == "$(<"$f")" ]]; then
+        kill -USR1 "$pid" 2>/dev/null || true
+    else
+        rm -f "$f"
+    fi
+done

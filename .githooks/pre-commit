@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+fail=0
+run() {
+    local label=$1 out
+    shift
+    if out=$("$@" 2>&1); then
+        printf '\033[32m✓ %s\033[0m\n' "$label"
+    else
+        printf '\033[31m✗ %s\033[0m\n%s\n' "$label" "$out"
+        fail=1
+    fi
+}
+
+need() { command -v "$1" >/dev/null || { printf '\033[33m! %s not installed, skipping\033[0m\n' "$1" && return 1; }; }
+
+sh=() zsh=() py=()
+while IFS= read -r f; do
+    [[ -f $f ]] || continue
+    case $f in
+        *.py) py+=("$f") ;;
+        home/dot-zshrc | zsh/*.zsh) zsh+=("$f") ;;
+        nvim/* | fish/* | zsh/* | */templates/* | *.md | *.json | *.toml | *.conf | *.txt) ;;
+        *) head -n1 "$f" | grep -qE '^#!.*[/ ](ba)?sh( |$)' && sh+=("$f") ;;
+    esac
+done < <(git ls-files --cached --others --exclude-standard)
+
+zsh_syntax() {
+    local f bad=0
+    for f in "$@"; do zsh -n "$f" || bad=1; done
+    return "$bad"
+}
+py_compile() { python3 -I -c 'import sys; [compile(open(f).read(), f, "exec") for f in sys.argv[1:]]' "$@"; }
+
+need stow && run "every package file is linked" ./link --check
+run "nothing confidential in the repo" .githooks/privacy-check .
+need shellcheck && run "shellcheck (${#sh[@]} files)" shellcheck "${sh[@]}"
+need zsh && run "zsh -n (${#zsh[@]} files)" zsh_syntax "${zsh[@]}"
+run "python compile (${#py[@]} files)" py_compile "${py[@]}"
+
+if ((fail)); then
+    printf '\nCommit blocked. Fix the issues above (or bypass once with: git commit --no-verify)\n'
+    exit 1
+fi

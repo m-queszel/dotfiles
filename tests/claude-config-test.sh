@@ -1,45 +1,54 @@
 #!/usr/bin/env bash
-# Portable Claude config test suite. Every test runs with HOME pointed at a temp folder.
-# Usage: bash scripts/tests/claude-config-test.sh [test_name...]
+# shellcheck disable=SC2016
 set -u
+unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME
 
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CLAUDE_DIR=$ROOT/claude
 BASE_TMP=$(mktemp -d)
 TMP=$BASE_TMP
 CURRENT=""
 
-fail() { echo "FAIL $CURRENT: $*"; exit 1; }
-assert_eq() { [ "$1" == "$2" ] || fail "$3 (expected '$1', got '$2')"; }
-assert_contains() { case "$1" in *"$2"*) ;; *) fail "$3 (missing '$2' in '$1')" ;; esac; }
-assert_not_contains() { case "$1" in *"$2"*) fail "$3 (unexpected '$2' in '$1')" ;; esac; }
+usage() {
+    cat <<'EOF'
+Claude config test suite. Every test runs with HOME pointed at a temp folder.
 
-installer() { source "$CLAUDE_DIR/install-claude"; }
-
-test_link_creates() {
-    installer
-    link_files "$CLAUDE_DIR" >/dev/null
-    local f
-    for f in CLAUDE.md rules/context7.md rules/working-style.md commands/commit-message.md statusline-command.sh; do
-        [ -L "$HOME/.claude/$f" ] || fail "$f is a symlink"
-        assert_eq "$CLAUDE_DIR/$f" "$(readlink "$HOME/.claude/$f")" "$f points into the repo"
-    done
+  tests/claude-config-test.sh [test_name...]
+EOF
 }
 
-test_link_backs_up_real_file() {
-    installer
+fail() {
+    echo "FAIL $CURRENT: $*"
+    exit 1
+}
+assert_eq() { [ "$1" == "$2" ] || fail "$3 (expected '$1', got '$2')"; }
+assert_contains() { case "$1" in *"$2"*) ;; *) fail "$3 (missing '$2' in '$1')" ;; esac }
+assert_not_contains() { case "$1" in *"$2"*) fail "$3 (unexpected '$2' in '$1')" ;; esac }
+
+installer() { source "$ROOT/bin/claude-setup"; }
+
+test_link_creates() {
+    "$ROOT/link" claude >/dev/null
+    local f
+    for f in CLAUDE.md rules/context7.md rules/working-style.md statusline-command.sh; do
+        [ -L "$HOME/.claude/$f" ] || fail "$f is a symlink"
+        assert_eq "$CLAUDE_DIR/$f" "$(readlink -f "$HOME/.claude/$f")" "$f points into the repo"
+    done
+    "$ROOT/link" --check claude >/dev/null || fail "link --check agrees"
+}
+
+test_backs_up_real_file() {
     mkdir -p "$HOME/.claude"
     echo old >"$HOME/.claude/CLAUDE.md"
-    link_files "$CLAUDE_DIR" >/dev/null
+    "$ROOT/link" claude >/dev/null || fail "links with a real file in the way"
     [ -L "$HOME/.claude/CLAUDE.md" ] || fail "replaced by a symlink"
     assert_eq old "$(cat "$HOME"/.claude/CLAUDE.md.bak-*)" "old file backed up"
 }
 
-test_link_idempotent() {
-    installer
-    link_files "$CLAUDE_DIR" >/dev/null
-    link_files "$CLAUDE_DIR" >/dev/null
-    [ -L "$HOME/.claude/CLAUDE.md" ] || fail "links exist after re-run"
+test_backup_leaves_links_alone() {
+    "$ROOT/link" claude >/dev/null
+    "$ROOT/link" claude >/dev/null
+    [ -L "$HOME/.claude/CLAUDE.md" ] || fail "links survive a re-run"
     assert_eq 0 "$(find "$HOME/.claude" -name '*.bak-*' | wc -l | tr -d ' ')" "no backups on re-run"
 }
 
@@ -56,6 +65,16 @@ test_merge_concat_automode() {
     assert_eq '["$defaults","A","B"]' "$(jq -c .autoMode.soft_deny <<<"$out")" "arrays concatenated, deduped"
     assert_eq '["org: placeholder"]' "$(jq -c .autoMode.environment <<<"$out")" "private environment kept"
     assert_eq opus "$(jq -r .model <<<"$out")" "shared keys kept"
+}
+
+test_merge_keeps_both_sets_of_hooks() {
+    installer
+    echo '{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"shared"}]}]}}' >"$TMP/shared.json"
+    echo '{"model":"mine","hooks":{"Stop":[{"hooks":[{"type":"command","command":"private"}]}]}}' >"$TMP/private.json"
+    local out
+    out=$(merge_settings "$TMP/shared.json" "$TMP/private.json")
+    assert_eq '["shared","private"]' "$(jq -c '[.hooks.Stop[].hooks[].command]' <<<"$out")" "hooks from both files run"
+    assert_eq mine "$(jq -r .model <<<"$out")" "private value wins"
 }
 
 test_merge_no_private() {
@@ -89,6 +108,22 @@ test_write_quiet_when_unchanged() {
     assert_eq 0 "$(find "$HOME/.claude" -name 'settings.json.bak-*' | wc -l | tr -d ' ')" "no backup"
 }
 
+test_first_run_keeps_existing_settings() {
+    installer
+    mkdir -p "$TMP/repo" "$HOME/.claude"
+    echo '{"model":"opus","theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"shared"}]}]}}' >"$TMP/repo/settings.shared.json"
+    echo '{"model":"mine","hooks":{"Stop":[{"hooks":[{"type":"command","command":"local"}]}]},"extra":1}' >"$HOME/.claude/settings.json"
+    write_settings "$TMP/repo" >/dev/null
+    local out=$HOME/.claude/settings.json
+    assert_eq '{"extra":1,"hooks":{"Stop":[{"hooks":[{"command":"local","type":"command"}]}]},"model":"mine"}' \
+        "$(jq -cS . "$HOME/.claude/settings.private.json")" "what only this machine had becomes private"
+    assert_eq mine "$(jq -r .model "$out")" "this machine's value survives"
+    assert_eq 1 "$(jq -r .extra "$out")" "this machine's extra key survives"
+    assert_eq dark "$(jq -r .theme "$out")" "shared key added"
+    assert_eq '["shared","local"]' "$(jq -c '[.hooks.Stop[].hooks[].command]' "$out")" "both hooks kept"
+    assert_eq mine "$(jq -r .model "$HOME"/.claude/settings.json.bak-*)" "the old file is backed up"
+}
+
 test_split_roundtrip() {
     installer
     fixture_shared
@@ -106,6 +141,15 @@ test_split_keeps_private_plugins() {
     assert_eq true "$(jq '.enabledPlugins["secret@mkt"]' "$TMP/private.json")" "private plugin kept in private"
     assert_eq null "$(jq .model "$TMP/private.json")" "shared keys not duplicated"
     assert_eq "$(sorted_json "$TMP/current.json")" "$(merge_settings "$TMP/shared.json" "$TMP/private.json" | sorted_json /dev/stdin)" "rebuilds current"
+}
+
+test_shared_settings_point_at_linked_files() {
+    local cmd
+    while IFS= read -r cmd; do
+        [ -x "$ROOT/bin/${cmd##*/}" ] || fail "hook command $cmd has no script in bin/"
+    done < <(jq -r '[.hooks[][].hooks[].command | select(startswith("~/.local/bin/"))] | unique[]' "$CLAUDE_DIR/settings.shared.json")
+    assert_eq "bash ~/.claude/statusline-command.sh" "$(jq -r .statusLine.command "$CLAUDE_DIR/settings.shared.json")" "status line command"
+    [ -x "$CLAUDE_DIR/statusline-command.sh" ] || fail "status line script is in the claude package"
 }
 
 stub_cli() {
@@ -151,15 +195,13 @@ test_plugins_already_installed_is_silent() {
     true
 }
 
-test_skills_list_has_no_unused_pack() {
-    assert_not_contains "$(cat "$CLAUDE_DIR/skills.txt")" "Cybersecurity-Skills" "unused 818-skill pack dropped"
-}
-
 test_plugins_missing_cli() {
     installer
     fixture_merged_settings
+    mkdir -p "$TMP/tools"
+    ln -s "$(command -v jq)" "$TMP/tools/jq"
     local out
-    out=$(PATH=/usr/bin:/bin install_plugins) || fail "missing claude CLI is not an error"
+    out=$(PATH=$TMP/tools install_plugins) || fail "missing claude CLI is not an error"
     assert_contains "$out" "claude CLI not found" "hint printed"
 }
 
@@ -172,12 +214,11 @@ test_skills_commands() {
 
 plant_repo() {
     git init -q "$TMP/repo"
-    cp -R "$CLAUDE_DIR" "$TMP/repo/claude"
     printf '%s\n' "$1" >"$TMP/repo/notes.txt"
 }
 
 test_privacy_clean() {
-    "$CLAUDE_DIR/privacy-check" "$ROOT" >/dev/null || fail "the real repo passes the built-in checks"
+    "$ROOT/.githooks/privacy-check" "$ROOT" || fail "the real repo passes the built-in checks"
 }
 
 test_privacy_term() {
@@ -185,32 +226,42 @@ test_privacy_term() {
     echo zebracorp >"$HOME/.claude/private-terms.txt"
     plant_repo "client is $(printf 'Zebra%s' Corp)"
     local out
-    out=$("$CLAUDE_DIR/privacy-check" "$TMP/repo") && fail "planted term must fail"
+    out=$("$ROOT/.githooks/privacy-check" "$TMP/repo") && fail "planted term must fail"
     assert_contains "$out" "notes.txt" "offending file reported"
 }
 
 test_privacy_email() {
     plant_repo "contact $(printf '%s@%s' a b.co)"
     local out
-    out=$("$CLAUDE_DIR/privacy-check" "$TMP/repo") && fail "planted email must fail"
+    out=$("$ROOT/.githooks/privacy-check" "$TMP/repo") && fail "planted email must fail"
     assert_contains "$out" "notes.txt" "offending file reported"
 }
 
-test_install_stops_on_leak() {
-    mkdir -p "$HOME/.claude"
-    echo zebracorp >"$HOME/.claude/private-terms.txt"
-    plant_repo "$(printf 'Zebra%s' Corp)"
-    "$TMP/repo/claude/install-claude" >/dev/null 2>&1 && fail "install must stop on a leak"
-    [ -e "$HOME/.claude/settings.json" ] && fail "nothing written before the check passes"
-    true
+test_link_replaces_old_installer_links() {
+    mkdir -p "$HOME/.config" "$HOME/.local/bin"
+    ln -s "$ROOT/kitty" "$HOME/.config/kitty"
+    ln -s "$ROOT/scripts/t" "$HOME/.local/bin/t"
+    ln -s "$ROOT/bin/theme" "$HOME/.local/bin/theme"
+    echo mine >"$HOME/.local/bin/unrelated"
+    "$ROOT/link" kitty bin >/dev/null || fail "links over the old installer's links"
+    [ ! -L "$HOME/.config/kitty" ] || fail "whole-folder link replaced by a real folder"
+    [ -f "$ROOT/kitty/kitty.conf" ] || fail "the repo's own files survive"
+    assert_eq "$ROOT/kitty/kitty.conf" "$(readlink -f "$HOME/.config/kitty/kitty.conf")" "kitty.conf linked on its own"
+    assert_eq "$ROOT/bin/t" "$(readlink -f "$HOME/.local/bin/t")" "dangling link repointed"
+    assert_eq mine "$(cat "$HOME/.local/bin/unrelated")" "files outside the package untouched"
+    assert_eq 0 "$(find "$HOME" -name '*.bak-*' | wc -l | tr -d ' ')" "old links are not backed up"
+    "$ROOT/link" --check kitty bin >/dev/null || fail "link --check agrees"
 }
 
 sorted_json() { jq -S 'if .autoMode then .autoMode |= with_entries(if (.value | type) == "array" then .value |= sort else . end) else . end' "$1"; }
 
 trap 'rm -rf "$BASE_TMP"' EXIT
 
+case ${1:-} in -h | --help) usage && exit 0 ;; esac
 names=("$@")
-[ ${#names[@]} -gt 0 ] || names=($(declare -F | awk '{print $3}' | grep '^test_'))
+if [ ${#names[@]} -eq 0 ]; then
+    while read -r name; do names+=("$name"); done < <(declare -F | awk '{print $3}' | grep '^test_')
+fi
 failed=0
 for CURRENT in "${names[@]}"; do
     TMP=$BASE_TMP/$CURRENT && mkdir -p "$TMP/home"
