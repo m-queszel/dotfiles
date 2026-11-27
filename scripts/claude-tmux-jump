@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Lists Claude panes across every tmux session and jumps between them.
+# Usage:
+#   claude-tmux-jump list [--attn]   PANE  GLYPH STATE  AGE  SESSION:WINDOW  LABEL (tab-separated)
+#   claude-tmux-jump pick            fzf over the list (tmux prefix+a, inside display-popup)
+#   claude-tmux-jump next            newest pane that needs you (tmux prefix+u)
+
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/claude-tmux-hook"
+
+list() {
+    local rows tab=$'\t' p
+    rows=$(tm list-panes -a -F "#{pane_id}${tab}#{@claude_state}${tab}#{@claude_attn}${tab}#{@claude_ts}${tab}#{session_name}:#{window_index}${tab}#{@claude_label}${tab}#{pane_current_command}" |
+        awk -F'\t' -v OFS='\t' -v now="$(date +%s)" -v attn_only="$([ "${1:-}" = --attn ] && echo 1)" '
+            $2 == "" { next }
+            $7 ~ /^-?(zsh|fish|bash|sh)$/ { print "STALE", $1; next }
+            attn_only && $3 != "1" { next }
+            {
+                rank = ($2 == "waiting") ? 0 : ($2 == "done") ? 1 : ($2 == "working" || $2 == "agents") ? 2 : 3
+                glyph = (rank == 0) ? "◆" : (rank == 1) ? "✓" : ($2 == "agents") ? "◐" : (rank == 2) ? "●" : "○"
+                ts = ($4 == "") ? 0 : $4
+                d = now - ts
+                age = (ts == 0) ? "-" : (d < 60) ? d "s" : (d < 3600) ? int(d / 60) "m" : int(d / 3600) "h"
+                print rank, ts, $1, glyph " " $2, age, $5, $6
+            }')
+    for p in $(awk -F'\t' '$1 == "STALE" { print $2 }' <<<"$rows"); do set_attn "$p" 0; done
+    refresh_status
+    grep -v '^STALE' <<<"$rows" | grep . | sort -t "$tab" -k1,1n -k2,2nr | cut -f3-
+}
+
+jump() {
+    tm switch-client -t "$1"
+    tm select-window -t "$1"
+    tm select-pane -t "$1"
+}
+
+pick() {
+    local choice
+    choice=$(list | fzf --delimiter='\t' --with-nth=2.. --ansi --tiebreak=index --prompt='agent> ') || return 0
+    [ -n "$choice" ] && jump "${choice%%$'\t'*}"
+}
+
+next() {
+    local p
+    p=$(list --attn | head -1 | cut -f1)
+    if [ -n "$p" ]; then jump "$p"; else tm display-message "No agent needs you"; fi
+}
+
+case ${1:-} in
+    list) list "${2:-}" ;;
+    pick) pick ;;
+    next) next ;;
+    *) echo "usage: claude-tmux-jump list [--attn] | pick | next" >&2 && exit 2 ;;
+esac
+exit 0

@@ -17,3 +17,9 @@ ln -s $DOTFILES/nvim $HOME/.config/nvim
 
 rm -rf $HOME/.config/fish
 ln -s $DOTFILES/fish $HOME/.config/fish
+
+for name in claude-tmux-hook claude-tmux-pulse claude-tmux-jump; do
+    ln -sf $DOTFILES/scripts/$name $HOME/.local/bin/$name
+done
+
+"$DOTFILES/claude/install-claude"

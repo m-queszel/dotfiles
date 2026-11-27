@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# Claude Code hook for the tmux cockpit.
+# Records each Claude pane's state as tmux pane options:
+#   @claude_state idle|working|agents|waiting|done @claude_attn 1|unset
+#   @claude_label branch or folder           @claude_ts epoch of last waiting/done
+# Modes:
+#   claude-tmux-hook                       Claude Code hook: event JSON on stdin, pane = $TMUX_PANE
+#   claude-tmux-hook focus-in PANE         tmux pane-focus-in hook
+#   claude-tmux-hook focus-out PANE FLAGS  tmux pane-focus-out hook (FLAGS = #{client_flags})
+# Never blocks Claude: always exits 0 and prints nothing.
+
+tm() { tmux "$@" 2>/dev/null; }
+
+opt_get() {
+    local v
+    if [ "$1" = -g ]; then v=$(tm show -gqv "$2"); else v=$(tm show -pqv -t "$1" "$2"); fi
+    echo "${v:-$3}"
+}
+
+refresh_status() {
+    local c
+    for c in $(tm list-clients -F '#{client_name}'); do tm refresh-client -S -t "$c"; done
+}
+
+set_state() {
+    local p=$1 o
+    if [ "$2" = none ]; then
+        for o in @claude_state @claude_attn @claude_label @claude_ts @claude_glow; do
+            tm set -pu -t "$p" "$o"
+        done
+    else
+        tm set -p -t "$p" @claude_state "$2"
+        case $2 in waiting | done) tm set -p -t "$p" @claude_ts "$(date +%s)" ;; esac
+    fi
+    refresh_status
+}
+
+set_attn() {
+    if [ "$2" = 1 ]; then tm set -p -t "$1" @claude_attn 1; else tm set -pu -t "$1" @claude_attn; fi
+}
+
+set_label() {
+    local p=$1 base n cur
+    base=$(git -C "$2" branch --show-current 2>/dev/null)
+    [ -n "$base" ] || base=$(basename "${2:-claude}")
+    cur=$(opt_get "$p" @claude_label "")
+    case $cur in "$base" | "$base #"*) return 0 ;; esac
+    n=$(tm list-panes -a -F "#{pane_id}	#{@claude_label}" |
+        awk -F'\t' -v me="$p" -v b="$base" '$1 != me && ($2 == b || index($2, b " #") == 1)' |
+        wc -l | tr -d ' ')
+    [ "$n" -gt 0 ] && base="$base #$((n + 1))"
+    tm set -p -t "$p" @claude_label "$base"
+}
+
+start_pulse() {
+    local dir
+    dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    nohup "$dir/claude-tmux-pulse" "${TMUX%%,*}" </dev/null >/dev/null 2>&1 &
+}
+
+is_looking() {
+    local info
+    info=$(tm display -p -t "$1" '#{pane_active}#{window_active}|#{session_name}')
+    [ "${info%%|*}" = 11 ] || return 1
+    tm list-clients -t "${info#*|}" -F '#{client_flags}' | grep -q focused
+}
+
+b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+
+osc99() {
+    local id="cockpit$(date +%s)"
+    printf '\033]99;i=%s:d=0:e=1:p=title;%s\033\\\033]99;i=%s:d=1:e=1:p=body;%s\033\\' \
+        "$id" "$(b64 "$1")" "$id" "$(b64 "$2")"
+}
+
+notify() {
+    if [ -n "${COCKPIT_NOTIFY_LOG:-}" ]; then
+        printf '%s\t%s\n' "$1" "$2" >>"$COCKPIT_NOTIFY_LOG"
+        return 0
+    fi
+    local tty
+    tty=$(tm list-clients -F '#{client_activity} #{client_tty}' | sort -rn | head -1 | cut -d' ' -f2)
+    if [ -n "$tty" ] && [ -w "$tty" ]; then
+        osc99 "$1" "$2" >"$tty"
+    else
+        osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
+            -e 'end run' "$1" "$2" >/dev/null 2>&1
+    fi
+}
+
+notify_event() { notify "Claude · $(opt_get "$1" @claude_label claude)" "$2"; }
+
+alert() {
+    if is_looking "$1"; then
+        set_state "$1" "$2"
+        return 0
+    fi
+    set_attn "$1" 1
+    set_state "$1" "$2"
+    notify_event "$1" "$3"
+    [ "$2" = waiting ] && start_pulse
+}
+
+handle_event() {
+    local p=$1 event cwd tool ntype source reason summary question message lastline agents
+    IFS=$'\x1f' read -r event cwd tool ntype source reason summary question message lastline agents <<<"$(jq -r '
+        [ .hook_event_name, .cwd, .tool_name, .notification_type, .source, .reason,
+          ((.tool_input // {}) | (if type == "object" then (.command // .file_path // .url // tostring)
+                                  else tostring end) | tostring | .[0:80]),
+          ((try .tool_input.questions[0].question catch "") // "" | tostring | .[0:100]),
+          ((.message // "") | tostring | .[0:100]),
+          ((.last_assistant_message // "") | tostring | split("\n")[0] | .[0:100]),
+          ([.background_tasks[]? | select(.type | IN("subagent", "workflow", "teammate", "cloud session"))] | length) ]
+        | map(. // "" | tostring | gsub("[\u0000-\u001f]"; " ")) | join("\u001f")' 2>/dev/null)"
+    case $event in
+        SessionStart) set_label "$p" "$cwd" && [ "$source" != compact ] && set_state "$p" idle ;;
+        UserPromptSubmit) set_attn "$p" 0 && set_state "$p" working ;;
+        PostToolUse | PostToolUseFailure)
+            [ "$(opt_get "$p" @claude_state "")" = waiting ] && set_attn "$p" 0 && set_state "$p" working ;;
+        PermissionRequest) [ "$tool" = AskUserQuestion ] || alert "$p" waiting "$tool: $summary" ;;
+        PreToolUse) [ "$tool" = AskUserQuestion ] && alert "$p" waiting "${question:-Claude has a question}" ;;
+        Notification) [ "$ntype" = elicitation_dialog ] && alert "$p" waiting "${message:-Claude needs input}" ;;
+        StopFailure) alert "$p" waiting "Turn ended with an error" ;;
+        Stop) if [ "${agents:-0}" -gt 0 ]; then set_attn "$p" 0 && set_state "$p" agents; else alert "$p" done "${lastline:-Finished}"; fi ;;
+        SessionEnd) case $reason in clear | resume) ;; *) set_state "$p" none ;; esac ;;
+    esac
+}
+
+focus_in() {
+    [ -n "$(opt_get "$1" @claude_attn "")" ] && set_attn "$1" 0 && refresh_status
+}
+
+focus_out() {
+    case $2 in *focused*) ;; *) return 0 ;; esac
+    [ "$(opt_get "$1" @claude_state "")" = waiting ] && set_attn "$1" 0 && set_state "$1" working
+}
+
+main() {
+    case ${1:-} in
+        focus-in) focus_in "${2:-}" ;;
+        focus-out) focus_out "${2:-}" "${3:-}" ;;
+        *) [ -n "${TMUX_PANE:-}" ] && handle_event "$TMUX_PANE" ;;
+    esac
+    exit 0
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

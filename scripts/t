@@ -1,15 +1,133 @@
 #!/usr/bin/env bash
 # Credit to ThePrimeagen
-if [[ $# -eq 1 ]]; then
-    selected=$1
-else
-    items=`find ~/Development/ -maxdepth 2 -mindepth 1 -type d`
-    items+=`echo -e "\n/tmp"`
-    selected=`echo "$items" | fzf`
-fi
-dirname=`basename $selected | sed 's/\./_/g'`
-tmux switch-client -t =$dirname
-if [[ $? -eq 0 ]]; then
-    exit 0
-fi
-tmux new-session -c $selected -d -s $dirname && tmux switch-client -t $dirname || tmux new -c $selected -A -s $dirname
+# Workspace launcher for the Claude cockpit: one tmux session per repo or worktree,
+# with Claude on the left and a shell on the right.
+#   t          pick a repo/worktree under the root (or "+ new worktree")
+#   t PATH     open PATH
+# The root is where tmux was opened; sessions made by t inherit it (@cockpit_root).
+
+cockpit_root() {
+    if [ -z "${TMUX:-}" ]; then
+        pwd
+        return
+    fi
+    local r
+    r=$(tmux show -qv @cockpit_root 2>/dev/null)
+    [ -n "$r" ] || r=$(tmux display -p '#{session_path}' 2>/dev/null)
+    echo "${r:-$PWD}"
+}
+
+list_candidates() {
+    { [ -e "$1/.git" ] && echo "$1"
+        find "$1" -mindepth 2 -maxdepth 3 -name .git 2>/dev/null | while read -r g; do dirname "$g"; done | sort; }
+    echo "+ new worktree"
+}
+
+slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'; }
+
+worktree_dir() {
+    local key
+    if [[ $2 =~ ^([A-Za-z]+)-([0-9]+) ]]; then
+        key=$(echo "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
+    else
+        key=$(slug "$2")
+    fi
+    echo "$(dirname "$1")/$(basename "$1")-$key"
+}
+
+copy_includes() {
+    local repo=$1 dir=$2 line
+    if [ -f "$repo/.worktreeinclude" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            case $line in '' | '#'*) continue ;; esac
+            (cd "$repo" && for f in $line; do
+                case /$f/ in //* | */../* | */./*) continue ;; esac
+                [ -e "$f" ] && mkdir -p "$dir/$(dirname "$f")" && cp -R "$f" "$dir/$(dirname "$f")/"
+            done)
+        done <"$repo/.worktreeinclude"
+    elif [ -f "$repo/.env" ]; then
+        cp "$repo/.env" "$dir/.env"
+    fi
+}
+
+new_worktree() {
+    local repo=$1 branch=$2 dir base
+    dir=$(git -C "$repo" worktree list --porcelain |
+        awk -v b="branch refs/heads/$branch" '/^worktree /{ w = substr($0, 10) } $0 == b { print w; exit }')
+    if [ -n "$dir" ]; then
+        echo "$dir"
+        return 0
+    fi
+    dir=$(worktree_dir "$repo" "$branch")
+    if [ -e "$dir" ]; then
+        echo "t: $dir already exists" >&2
+        return 1
+    fi
+    git -C "$repo" fetch -q origin >&2
+    if git -C "$repo" show-ref -q --verify "refs/heads/$branch" ||
+        git -C "$repo" show-ref -q --verify "refs/remotes/origin/$branch"; then
+        git -C "$repo" worktree add -q "$dir" "$branch" >&2 || return 1
+    else
+        base=$(git -C "$repo" symbolic-ref -q --short refs/remotes/origin/HEAD) || base=HEAD
+        git -C "$repo" worktree add -q --no-track -b "$branch" "$dir" "$base" >&2 || return 1
+    fi
+    copy_includes "$repo" "$dir"
+    echo "$dir"
+}
+
+project_key() { echo "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
+
+claude_cmd() {
+    local name=$2
+    [[ $name =~ ^[A-Za-z0-9._/-]+$ ]] || name=$(slug "$name")
+    if ls "$HOME/.claude/projects/$(project_key "$1")"/*.jsonl >/dev/null 2>&1; then
+        echo "claude --continue"
+    else
+        echo "claude -n '$name'"
+    fi
+}
+
+open_session() {
+    local dir=$1 name left
+    name=$(basename "$dir" | tr . _)
+    if ! tmux has-session -t "=$name" 2>/dev/null; then
+        left=$(tmux new-session -d -s "$name" -c "$dir" -P -F '#{pane_id}') || return 1
+        tmux set -t "$left" @cockpit_root "$2"
+        tmux split-window -d -h -l 40% -t "$left" -c "$dir"
+        tmux send-keys -t "$left" "$3" Enter
+    fi
+    if [ -n "${TMUX:-}" ]; then
+        tmux switch-client -t "=$name" 2>/dev/null || true
+    else
+        tmux attach -t "=$name"
+    fi
+}
+
+main() {
+    local root dir repo repos branch
+    root=$(cockpit_root)
+    if [ $# -eq 1 ]; then
+        dir=$1
+    else
+        dir=$(list_candidates "$root" | fzf --prompt="t> ") || exit 0
+    fi
+    if [ "$dir" = "+ new worktree" ]; then
+        repos=$(list_candidates "$root" | while read -r d; do [ -d "$d/.git" ] && echo "$d"; done)
+        if [ "$(grep -c . <<<"$repos")" -gt 1 ]; then
+            repo=$(fzf --prompt="repo> " <<<"$repos") || exit 0
+        else
+            repo=$repos
+        fi
+        [ -n "$repo" ] || { echo "t: no git repo under $root" >&2 && exit 1; }
+        read -r -p "Branch: " branch
+        [ -n "$branch" ] || exit 0
+        dir=$(new_worktree "$repo" "$branch") || { read -r -p "Press Enter to close" _ && exit 1; }
+    else
+        dir=$(cd "$dir" && pwd) || exit 1
+        branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+        [ -n "$branch" ] || branch=$(basename "$dir")
+    fi
+    open_session "$dir" "$root" "$(claude_cmd "$dir" "$branch")"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

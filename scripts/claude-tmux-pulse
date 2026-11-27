@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Pulses the border and header of Claude panes that need you (waiting + unseen),
+# fading between bright and dim amber. One loop per tmux server; it exits when no pane
+# needs it or when the server goes away. Started by claude-tmux-hook.
+# Usage: claude-tmux-pulse [SOCKET]   (SOCKET defaults to the server in $TMUX)
+
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/claude-tmux-hook"
+[ -n "${1:-}" ] && export TMUX="$1,0,0"
+
+COND='#{&&:#{&&:#{==:#{@claude_state},waiting},#{==:#{@claude_attn},1}},#{!:#{m/r:^-?(zsh|fish|bash|sh)$,#{pane_current_command}}}}'
+
+pulse_alive() {
+    local pid
+    pid=$(opt_get -g @claude_pulse_pid "")
+    [ -n "$pid" ] && ps -p "$pid" -o args= 2>/dev/null | grep -q claude-tmux-pulse
+}
+
+needy_panes() { tm list-panes -a -F "#{?$COND,#{pane_id},}" | grep .; }
+
+pulse() {
+    local server bright dim shade p interval=${COCKPIT_PULSE_INTERVAL:-0.75}
+    pulse_alive && return 0
+    server=$(tm display -p '#{pid}') || return 0
+    tm set -g @claude_pulse_pid $$
+    bright=$(opt_get -g @cockpit_amber '#e0a040')
+    dim=$(opt_get -g @cockpit_amber_dim '#7a5a28')
+    shade=$dim
+    while :; do
+        [ "$(tm display -p '#{pid}')" = "$server" ] || return 0
+        [ "$(opt_get -g @claude_pulse_pid "")" = $$ ] || return 0
+        if ! needy_panes >/dev/null; then
+            tm set -gu @claude_pulse_pid
+            needy_panes >/dev/null || return 0
+            tm set -g @claude_pulse_pid $$
+        fi
+        if [ "$shade" = "$bright" ]; then shade=$dim; else shade=$bright; fi
+        for p in $(needy_panes); do
+            tm if -F -t "$p" "$COND" "set -p -t $p @claude_glow '$shade'"
+        done
+        tm set -g pane-border-style "$(tm show -gv pane-border-style)"
+        refresh_status
+        sleep "$interval"
+    done
+}
+
+pulse
